@@ -9,6 +9,8 @@ shared_script 'config.lua'
 client_script 'client.lua'
 server_script 'server.js'
 
+data_file 'DLC_ITYP_REQUEST' 'stream/it_greenscreen_props.ytyp'
+
 ui_page 'web/index.html'
 
 files {

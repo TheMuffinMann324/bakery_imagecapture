@@ -64,11 +64,9 @@ Config.DefaultVehicleCamera = {
 }
 
 -- Green screen setup
-Config.GreenScreenProp = 'prop_big_cin_screen'
+Config.GreenScreenProp = 'it_greenscreen_120x80'   -- your 120 m x 80 m panel (stream/it_greenscreen_120x80.ydr)
 Config.GreenScreenOffsets = {
-    vector3(0.0, 0.0, 15.0),
-    vector3(0.0, 0.0, 0.0),
-    vector3(0.0, 0.0, -15.0),
+    vector3(0.0, 0.0, -30.0), -- one panel is big enough for the studio; lowered 30 m from its base at the studio point
 }
 
 Config.AdjustControls = {
@@ -85,3 +83,13 @@ Config.AdjustControls = {
     confirm = 191,         -- ENTER
     cancel = 194,          -- BACKSPACE
 }
+
+-- Big world props: anything wider, deeper or taller than PropFitSize metres gets a camera fitted to it
+-- and a green backdrop wide enough behind it. Set BackdropHeading to 0 if the backdrop shows its back side.
+-- PropCamera overrides one model: { distance = 30.0, fov = 40.0 }.
+Config.PropFitSize = 3.0
+Config.BackdropHeading = 180.0
+Config.PropCamera = {}
+
+-- How far the backdrop behind each world prop sits below the prop's centre (metres).
+Config.BackdropDrop = -30.0

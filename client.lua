@@ -111,7 +111,7 @@ RegisterNetEvent('sintic-imagecapture:imageSaved', function(success, filename)
 end)
 
 
-local function SetupStudio()
+local function SetupStudio(withWall)
     local playerPed = PlayerPedId()
 
     SetWeatherTime()
@@ -128,11 +128,13 @@ local function SetupStudio()
     local propHash = GetHashKey(Config.GreenScreenProp)
     LoadModel(propHash)
 
-    for _, offset in ipairs(Config.GreenScreenOffsets) do
-        local pos = Config.StudioLocation + offset
-        local prop = CreateObject(propHash, pos.x, pos.y, pos.z, false, false, false)
-        FreezeEntityPosition(prop, true)
-        table.insert(greenScreenProps, prop)
+    if withWall ~= false then
+        for _, offset in ipairs(Config.GreenScreenOffsets) do
+            local pos = Config.StudioLocation + offset
+            local prop = CreateObject(propHash, pos.x, pos.y, pos.z, false, false, false)
+            FreezeEntityPosition(prop, true)
+            table.insert(greenScreenProps, prop)
+        end
     end
 
     DisplayRadar(false)
@@ -1112,9 +1114,10 @@ local function CapturePedProps(gender, propFilter)
 end
 
 
-local function CaptureVehicle(modelName)
+local function CaptureVehicle(modelName, onDone)
     if isCapturing then
         ShowNotification('Capture already in progress')
+        if onDone then onDone(false) end
         return
     end
 
@@ -1175,8 +1178,9 @@ local function CaptureVehicle(modelName)
             return false
         end
 
-        AwaitCapture(filename, 'vehicles')
-        totalCaptures = totalCaptures + 1
+        if AwaitCapture(filename, 'vehicles') then
+            totalCaptures = totalCaptures + 1
+        end
 
         Wait(500)
 
@@ -1197,29 +1201,69 @@ local function CaptureVehicle(modelName)
 
     CleanupStudio()
     ShowNotification('Vehicle capture complete: ' .. totalCaptures .. ' images')
+    if onDone then onDone(totalCaptures > 0) end
 end
 
 
-local function CaptureWorldProp(modelName)
+-- Big props get a green backdrop behind them, wide and tall enough to fill the frame from the camera
+-- distance used. Screens are sized from the model; the heading is the camera's, flipped to face it.
+local function SpawnPropBackdrop(entity, camDistance, fov, size)
+    local screenHash = GetHashKey(Config.GreenScreenProp)
+    local smin, smax = GetModelDimensions(screenHash)
+    local sw = math.max(smax.x - smin.x, 0.5)
+    local sh = math.max(smax.z - smin.z, 0.5)
+
+    local heading = GetEntityHeading(entity)
+    local rad = math.rad(heading + 180)
+    local view = vector3(-math.sin(rad), -math.cos(rad), 0.0)      -- camera -> prop
+    local across = vector3(math.cos(rad), -math.sin(rad), 0.0)     -- across the view
+    local min, max = GetModelDimensions(GetEntityModel(entity))
+    local c = GetEntityCoords(entity)
+    local centreZ = c.z + (min.z + max.z) / 2 + Config.BackdropDrop
+
+    local camPos = c - view * camDistance
+    local backDist = camDistance + size * 0.5 + 1.0
+    local span = 2.0 * backDist * math.tan(math.rad(fov / 2)) * 1.15
+    local cols = math.ceil(span / sw)
+    local rows = math.ceil(span / sh)
+    local centre = camPos + view * backDist
+
+    for col = 0, cols - 1 do
+        for row = 0, rows - 1 do
+            local across_offset = (col - (cols - 1) / 2) * sw
+            local up_offset = (row - (rows - 1) / 2) * sh
+            local p = centre + across * across_offset
+            local screen = CreateObject(screenHash, p.x, p.y, centreZ + up_offset, false, false, false)
+            FreezeEntityPosition(screen, true)
+            SetEntityHeading(screen, -heading + Config.BackdropHeading)
+            table.insert(greenScreenProps, screen)
+        end
+    end
+end
+
+local function CaptureWorldProp(modelName, onDone)
     if isCapturing then
         ShowNotification('Capture already in progress')
+        if onDone then onDone(false) end
         return
     end
 
     if not modelName then
         ShowNotification('Please specify a prop model name')
+        if onDone then onDone(false) end
         return
     end
 
     isCapturing = true
 
-    SetupStudio()
+    SetupStudio(false)
 
     local hash = GetHashKey(modelName)
 
     if not LoadModel(hash) then
         ShowNotification('Failed to load model: ' .. modelName)
         CleanupStudio()
+        if onDone then onDone(false) end
         return
     end
 
@@ -1229,6 +1273,7 @@ local function CaptureWorldProp(modelName)
     if not DoesEntityExist(prop) then
         ShowNotification('Failed to create prop: ' .. modelName)
         CleanupStudio()
+        if onDone then onDone(false) end
         return
     end
 
@@ -1238,14 +1283,25 @@ local function CaptureWorldProp(modelName)
 
     Wait(1000)
 
-    SetupDynamicCamera(prop, 'prop')
+    -- Every world prop gets a camera that fills about 70% of the frame, and a backdrop placed behind
+    -- the prop itself, so the backdrop follows each prop instead of sitting at a fixed spot.
+    local min, max = GetModelDimensions(GetEntityModel(prop))
+    local size = math.max(max.x - min.x, max.y - min.y, max.z - min.z)
+    local override = Config.PropCamera and Config.PropCamera[modelName]
+    local camSettings = override
+    if not camSettings then
+        local fov = 40.0
+        camSettings = { fov = fov, distance = math.max((size * 0.5) / 0.7 / math.tan(math.rad(fov / 2)), 2.5) }
+    end
+    SetupDynamicCamera(prop, 'prop', camSettings)
+    SpawnPropBackdrop(prop, camSettings.distance, camSettings.fov or 40.0, size)
 
     -- Extra wait before capture
     Wait(500)
 
     local filename = modelName .. GetFileExtension()
 
-    AwaitCapture(filename, 'worldprops')
+    local saved = AwaitCapture(filename, 'worldprops')
 
     Wait(500)
 
@@ -1256,6 +1312,7 @@ local function CaptureWorldProp(modelName)
 
     CleanupStudio()
     ShowNotification('Prop capture complete: ' .. modelName)
+    if onDone then onDone(saved) end
 end
 
 
@@ -1807,4 +1864,14 @@ CreateThread(function()
     TriggerEvent('chat:addSuggestion', '/capture-all-vehicles', 'Capture all vehicles from in/vehicles.lua', {})
 
     TriggerEvent('chat:addSuggestion', '/capture-all-props', 'Capture all props from in/props.lua', {})
+end)
+
+-- Exports for other resources (bakery_racing). Takes one picture and calls onDone(true) only once
+-- the image file has been written, or onDone(false) if it wasn't.
+exports('CaptureVehicle', function(modelName, onDone)
+    CreateThread(function() CaptureVehicle(modelName, onDone) end)
+end)
+
+exports('CaptureProp', function(modelName, onDone)
+    CreateThread(function() CaptureWorldProp(modelName, onDone) end)
 end)
